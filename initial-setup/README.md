@@ -95,7 +95,7 @@ aws cloudformation create-stack \
 
 8. Install `yq`
    ```bash
-   sudo curl --silent --location -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.24.5/yq_linux_amd64
+   sudo curl --silent --location -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
    sudo chmod +x /usr/local/bin/yq
    ```
 
@@ -135,8 +135,7 @@ Having set up your Cloud9 environment, you can now install a number of tools tha
 1. Install Kubernetes CLI (`kubectl`)
    ```bash
    sudo curl --silent --location -o /usr/local/bin/kubectl \
-      https://s3.us-west-2.amazonaws.com/amazon-eks/1.24.7/2022-10-31/bin/linux/amd64/kubectl
-
+      https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.0/2024-09-12/bin/linux/amd64/kubectl
    sudo chmod +x /usr/local/bin/kubectl
    ```
 
@@ -147,8 +146,8 @@ Having set up your Cloud9 environment, you can now install a number of tools tha
 
 3. Install `kubeseal`
    ```bash
-   wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.19.4/kubeseal-0.19.4-linux-amd64.tar.gz
-   tar xfz kubeseal-0.19.4-linux-amd64.tar.gz
+   wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/kubeseal-0.27.0-linux-amd64.tar.gz
+   tar xfz kubeseal-0.27.0-linux-amd64.tar.gz
    sudo install -m 755 kubeseal /usr/local/bin/kubeseal
    ```
 
@@ -162,7 +161,7 @@ Having set up your Cloud9 environment, you can now install a number of tools tha
 
 5. Install `eksctl`
    ```bash
-   curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+   curl --silent --location "https://github.com/eksctl-io/eksctl/releases/download/v0.208.0/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
    sudo mv /tmp/eksctl /usr/local/bin
    ```
      
