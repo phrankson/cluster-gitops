@@ -623,10 +623,50 @@ Make sure the cluster is active before proceeding:
 aws eks wait cluster-active --name mgmt && echo "Ready"
 ```
 
-Follow the bootstrap guide for your Git backend:
+### Bootstrap with GitHub
 
-- [GitHub](doc/repos/GitHub-Bootstrap.md)
-- [AWS CodeCommit](doc/repos/AWSCodeCommit-Bootstrap.md)
+**Before you start:** Make sure `GITHUB_TOKEN` and `GITHUB_ACCOUNT` are still set in your terminal. If you opened a new shell, re-export them:
+```bash
+export GITHUB_TOKEN=<your-personal-access-token>
+export GITHUB_ACCOUNT=<your-github-username>
+```
+
+**Step 1:** Set the cluster name:
+```bash
+export CLUSTER_NAME=mgmt
+```
+
+**Step 2:** Run the Flux bootstrap command:
+```bash
+flux bootstrap github \
+  --components-extra=image-reflector-controller,image-automation-controller \
+  --owner=$GITHUB_ACCOUNT \
+  --namespace=flux-system \
+  --repository=gitops-system \
+  --branch=main \
+  --path=clusters/$CLUSTER_NAME \
+  --personal
+```
+
+**What this does:**
+- Installs Flux controllers into the cluster (`flux-system` namespace)
+- Creates a deploy key on the `gitops-system` GitHub repo so Flux can pull from it
+- Commits Flux's own manifests into `gitops-system/clusters/mgmt/flux-system/` and pushes them
+- Flux immediately starts reconciling — applying everything it finds under `clusters/mgmt/`
+
+> **Note:** This command will push commits to your `gitops-system` repo. Make sure the repo exists on GitHub and your local copy is up to date before running.
+
+**Step 3:** Watch bootstrap progress:
+```bash
+flux get all
+```
+
+Or poll every 30 seconds:
+```bash
+watch -n 30 -d flux get all
+```
+
+This may take 10–30 minutes on first boot due to exponential backoff as controllers start up.
 
 ---
 
