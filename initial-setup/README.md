@@ -1,213 +1,250 @@
-# The initial setup
+# Initial Setup
+
 ## Prerequisites
 
-Each cluster you create requires 1 VPC (with an Internet Gateway attached), 2
-Public Subnets, 2 Private Subnets, 2 NAT Gateways, and 2 Elastic IP Addresses
-(attached to the NAT Gateways). Please make sure that the quotas of the AWS
-account you use for deploying this sample implementation can accommodate that.
+### AWS account quotas
 
-## Initial setup (automated)
-A CloudFormation template is provided to speed up the initial setup. If you decided to use it, skip the sections below from **Create and prepare the Cloud9 workspace** to **Allow access to the management cluster from the EKS console** i.e. start at **Populate and update the repositories**.
+Each workload cluster you create requires 1 VPC (with an Internet Gateway), 2 Public Subnets,
+2 Private Subnets, 2 NAT Gateways, and 2 Elastic IP Addresses. Verify your account quotas
+can accommodate the number of clusters you plan to run before starting.
 
-Follow the steps below for deploying the CloudFormation template:
+### AWS credentials and permissions
 
-1. Set the environment variables.
+Your local AWS credentials must have sufficient permissions to:
+
+- Create and manage EKS clusters (via `eksctl`)
+- Create IAM roles and policies
+- Create and manage Secrets Manager secrets
+- Create S3 buckets and CloudFormation stacks (if using the automated setup)
+- Read/write ECR, VPC, EC2, and related resources (required by Crossplane)
+
+Verify your credentials are configured:
+```bash
+aws sts get-caller-identity
 ```
+
+If using AWS SSO:
+```bash
+aws sso login --profile <your-profile>
+export AWS_PROFILE=<your-profile>
+```
+
+### Required environment variables
+
+Set these before running any commands. Add them to your shell profile to persist across sessions.
+
+```bash
 export ACCOUNT_ID=$(aws sts get-caller-identity --output text --query Account)
-export AWS_REGION=$(aws configure get region)
+export AWS_REGION=$(aws configure get region)   # or: export AWS_REGION=us-east-1
+export EKS_CONSOLE_IAM_ENTITY_ARN=<ARN of the IAM user or role used to access the EKS console>
+
+# Choose a working directory for all generated files (keys, policy docs, kubeconfig, etc.)
+export GITOPS_HOME=~/gitops
+mkdir -p $GITOPS_HOME
+
+echo "Account: $ACCOUNT_ID  Region: $AWS_REGION"
 ```
 
-2. Create an S3 bucket, and upload the CloudFormation template to it.
+> **Tip:** Paste the four `export` lines into `~/.bash_profile` (or `~/.zshrc` on macOS) so they survive new terminal sessions.
 
-If you are deploying in us-east-1, create an S3 bucket using the following command:
-```
-aws s3api create-bucket \
-    --bucket gitops-cfn-${ACCOUNT_ID} \
-    --region ${AWS_REGION}
-```
-If you are deploying in any other region, create an S3 bucket using the following command:
-```
-aws s3api create-bucket \
-    --bucket gitops-cfn-${ACCOUNT_ID} \
-    --region ${AWS_REGION} \
-    --create-bucket-configuration LocationConstraint=${AWS_REGION}
-```
+---
 
-Use the command below for uploading the CloudFormation template to the S3 bucket:
-```
-aws s3api put-object --bucket gitops-cfn-${ACCOUNT_ID} --key cfn.yaml --body eks-multi-cluster-gitops/initial-setup/auto/cfn.yaml
+## Install required tools
+
+Run the appropriate block for your operating system.
+
+### Detect platform (run once)
+
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')       # linux or darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/;s/arm64/arm64/')
+echo "Platform: $OS/$ARCH"
 ```
 
-3. Deploy the CloudFormation template.
+### kubectl
+
+```bash
+# Linux (amd64)
+sudo curl --silent --location -o /usr/local/bin/kubectl \
+   https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.0/2024-09-12/bin/linux/amd64/kubectl
+sudo chmod +x /usr/local/bin/kubectl
+
+# macOS (Homebrew)
+brew install kubectl
+# or pin to the EKS-matched version:
+# curl -LO "https://dl.k8s.io/release/v1.31.0/bin/darwin/$(uname -m)/kubectl"
+# sudo install -m 755 kubectl /usr/local/bin/kubectl
 ```
-aws cloudformation create-stack \
-   --stack-name gitops-initial-setup \
-   --capabilities CAPABILITY_NAMED_IAM \
-   --template-url https://gitops-cfn-${ACCOUNT_ID}.s3.${AWS_REGION}.amazonaws.com/cfn.yaml \
-   --parameters ParameterKey=ConsoleRoleName,ParameterValue=Admin
+
+Verify: `kubectl version --client`
+
+### Flux CLI
+
+```bash
+curl -s https://fluxcd.io/install.sh | sudo bash
 ```
 
-## Create and prepare the Cloud9 workspace
-1. Navigate to the [Cloud9 console](https://console.aws.amazon.com/cloud9/).
+Verify: `flux version`
 
-2. Create a new Cloud9 environment with the name "gitops", using an EC2 *t2.micro* instance and *Ubuntu 18.04* platform. Leave all other settings as default, and select **Create Environment**.
+### kubeseal
 
-3. While the Cloud9 environment is being created, create an EC2 IAM role for your workspace instance as follows:
-    1. Open another tab to access the [IAM console](https://console.aws.amazon.com/iam/).
-    2. From the menu bar on the left, choose **Roles**.
-    3. Choose **Create Role**.
-    4. For **Trusted entity type** choose **AWS Service**, and then choose the use case **EC2**. Choose **Next**.
-    5. On the **Add Permissions** screen, choose **Create policy**. This action opens new tab in your browser for creating an IAM policy.
-    6. In the new browser tab, choose **JSON**, paste the content of [cloud9-role-permission-policy-template.json](config/cloud9-role-permission-policy-template.json), replace `${ACCOUNT_ID}` (3 occurrences) with your AWS account id, replace `${AWS_REGION}` (2 occurrence) with the AWS region you are using, choose **Next**, then choose **Next** again. ![](img/iam-create-policy-json.png)
-    7. Give the policy a name, for example "gitops-workshop", and choose **Create policy**. ![](img/iam-create-policy.png)
-    8. Return to the previous browser tab, click on the refresh button, select the IAM policy you created in the other browser tab.
-    9. Use the policy filter to find the policy `AmazonSSMManagedInstanceCore` and select this too. Choose **Next**.
-    10. Give the role a name, for example "gitops-workshop", and choose **Create role**. ![](img/iam-create-role.png)
+> **Version coupling:** `kubeseal` CLI **must** match the Sealed Secrets controller chart version.
+> This repo pins chart `2.16.2` (controller v0.27.x) → install `kubeseal` v0.27.0.
 
-4. Attach this IAM role to your Cloud9 EC2 instance as follows:
+```bash
+# Linux (amd64)
+wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/kubeseal-0.27.0-linux-amd64.tar.gz
+tar xfz kubeseal-0.27.0-linux-amd64.tar.gz
+sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 
-    1. Switch to the tab running your Cloud9 IDE.
+# macOS (arm64)
+wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/kubeseal-0.27.0-darwin-arm64.tar.gz
+tar xfz kubeseal-0.27.0-darwin-arm64.tar.gz
+sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 
-    2. If it has still not finished being created, then wait until creation is complete.
-    3. Click the grey circle button (in top right corner) and choose  **Manage EC2 Instance**.  ![](img/cloud9-role.png)
-    4. This opens the EC2 console in a separate tab, with a filter applied to show the EC2 instance for your Cloud9 IDE. Select the instance, then choose **Actions / Security / Modify IAM Role**. ![](img/c9instancerole.png)
-    5. On the **Modify IAM role** screen, choose *gitops-workshop* from the IAM role dropdown. ![](img/c9-modify-role.png)
-    6. Choose **Update IAM role**.
-    7. Close the tab and return to your Cloud9 IDE tab.
+# macOS (amd64)
+wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/kubeseal-0.27.0-darwin-amd64.tar.gz
+tar xfz kubeseal-0.27.0-darwin-amd64.tar.gz
+sudo install -m 755 kubeseal /usr/local/bin/kubeseal
+```
 
-5. In a Cloud9 Terminal window, upgrade to the latest AWS CLI using:
-   ```
-   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-   unzip awscliv2.zip
-   sudo ./aws/install
-   ```
+Verify: `kubeseal --version`
 
-6. Disable Cloud9 managed credentials using:
-   ```
-   aws cloud9 update-environment  --environment-id $C9_PID --managed-credentials-action DISABLE
-   rm -vf ${HOME}/.aws/credentials
-   ```
+### GitHub CLI (gh)
 
-7. Verify that Cloud9 is using the *gitops-workshop* IAM role you created.
-   ```
-   aws sts get-caller-identity --query Arn | grep gitops-workshop -q && echo "IAM role valid" || echo "IAM role NOT valid"
-   ```
+```bash
+# macOS
+brew install gh
 
-8. Install `yq`
-   ```bash
-   sudo curl --silent --location -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-   sudo chmod +x /usr/local/bin/yq
-   ```
+# Linux (Debian/Ubuntu)
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install gh
+```
 
-9. Track the account ID and region using environment variables,
-   and update `.bash_profile` and `~/.aws/config`so that these veriables will be available in all Cloud9 Terminal windows.
-   ```
-   export ACCOUNT_ID=$(aws sts get-caller-identity --output text --query Account)
-   export AWS_REGION=$(curl -s 169.254.169.254/latest/dynamic/instance-identity/document | yq -e '.region')
-   echo $ACCOUNT_ID:$AWS_REGION
-   echo "export ACCOUNT_ID=${ACCOUNT_ID}" | tee -a ~/.bash_profile
-   echo "export AWS_REGION=${AWS_REGION}" | tee -a ~/.bash_profile
-   aws configure set default.region ${AWS_REGION}
-   aws configure get default.region
-   ```
+Authenticate: `gh auth login`
 
-10. Track the ARN of the IAM entity that is used for accessing the EKS console using environment variables.
+### eksctl
 
-(Replace `<IAM user/role ARN>` in the command below with the ARN of the IAM user or role used for accessing the EKS console).
+```bash
+# Linux (amd64)
+curl --silent --location "https://github.com/eksctl-io/eksctl/releases/download/v0.208.0/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+sudo mv /tmp/eksctl /usr/local/bin
 
-   ```bash
-   export EKS_CONSOLE_IAM_ENTITY_ARN=<IAM user/role ARN>
-   echo "export EKS_CONSOLE_IAM_ENTITY_ARN=${EKS_CONSOLE_IAM_ENTITY_ARN}" | tee -a ~/.bash_profile
-   ```
+# macOS
+brew tap weaveworks/tap
+brew install weaveworks/tap/eksctl
+# or direct download:
+# curl --silent --location "https://github.com/eksctl-io/eksctl/releases/download/v0.208.0/eksctl_Darwin_arm64.tar.gz" | tar xz -C /tmp
+# sudo mv /tmp/eksctl /usr/local/bin
+```
 
-11. Increase the volume of the EBS volume to 30GB as follows.
-    1. Copy the [volume resize script from the Cloud9 documentation](https://docs.aws.amazon.com/cloud9/latest/user-guide/move-environment.html#move-environment-resize) into a file `resize.sh` in your Cloud9 environment.
-    2. Run 
-       ```
-       bash resize.sh 30
-       ```
+Verify: `eksctl version`
 
+### yq
 
-## Install tools and workshop files
+```bash
+# Linux (amd64)
+sudo curl --silent --location -o /usr/local/bin/yq \
+  https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+sudo chmod +x /usr/local/bin/yq
 
-Having set up your Cloud9 environment, you can now install a number of tools that will be used to build the multi-cluster GitOps environment.
+# macOS
+brew install yq
+```
 
-1. Install Kubernetes CLI (`kubectl`)
-   ```bash
-   sudo curl --silent --location -o /usr/local/bin/kubectl \
-      https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.0/2024-09-12/bin/linux/amd64/kubectl
-   sudo chmod +x /usr/local/bin/kubectl
-   ```
+Verify: `yq --version`
 
-2. Install Flux CLI
-   ```bash
-   curl -s https://fluxcd.io/install.sh | sudo bash
-   ```
+### envsubst (macOS only — pre-installed on Linux)
 
-3. Install `kubeseal`
-   ```bash
-   wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/kubeseal-0.27.0-linux-amd64.tar.gz
-   tar xfz kubeseal-0.27.0-linux-amd64.tar.gz
-   sudo install -m 755 kubeseal /usr/local/bin/kubeseal
-   ```
+`envsubst` is used to substitute environment variables in config templates. It is bundled with
+`gettext` on Linux but must be installed separately on macOS:
 
-4. Install the Github CLI
-   ```bash
-   curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-   sudo apt update
-   sudo apt install gh
-   ```
+```bash
+brew install gettext
+# gettext installs envsubst as a keg-only binary — link it:
+echo 'export PATH="/opt/homebrew/opt/gettext/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
 
-5. Install `eksctl`
-   ```bash
-   curl --silent --location "https://github.com/eksctl-io/eksctl/releases/download/v0.208.0/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-   sudo mv /tmp/eksctl /usr/local/bin
-   ```
-     
-6. Clone the workshop git repo:
-   ```
-   cd ~/environment
-   git clone https://github.com/aws-samples/multi-cluster-gitops.git
-   ```
-   
-## Create a secret in AWS Secret Manager for Sealed Secrets keys
+Verify: `envsubst --version`
 
-1. Generate a 4096-bit RSA key pair using *openssl*:
-   ```bash
-   cd ~/environment
-   openssl genrsa -out sealed-secrets-keypair.pem 4096
-   openssl req -new -x509 -key sealed-secrets-keypair.pem -out sealed-secrets-keypair-public.pem -days 3650
-   ```
-   Enter appropriate values (or accept defaults) for the various fields. 
-2. Create a JSON document that contains the certificate and the private key as follows:
-   ```
-   CRT=$(cat sealed-secrets-keypair-public.pem)
-   KEY=$(cat sealed-secrets-keypair.pem)
-   cat <<EoF >secret.json
-   {
-     "crt": "$CRT",
-     "key": "$KEY"
-   }
-   EoF
-   ```
-3. Store this JSON document as a `sealed-secrets` secret in the AWS Secrets Manager:
-   ```
-   aws secretsmanager create-secret \
-     --name sealed-secrets \
-     --secret-string file://secret.json
-   ```
+---
+
+## Clone this repository
+
+```bash
+cd $GITOPS_HOME
+git clone https://github.com/phrankson/eks-multi-cluster-gitops.git
+```
+
+---
+
+## Create a Sealed Secrets keypair in AWS Secrets Manager
+
+Flux uses Sealed Secrets to commit encrypted secrets to Git. The keypair is stored in
+Secrets Manager so the Sealed Secrets controller can retrieve it at runtime.
+
+> **Do this before bootstrapping the cluster.** The keypair must be in Secrets Manager
+> before External Secrets Operator runs, or the Sealed Secrets controller will start
+> without a keypair and generate a random one — breaking any existing SealedSecrets.
+
+```bash
+cd $GITOPS_HOME
+
+# Generate a 4096-bit RSA keypair
+openssl genrsa -out sealed-secrets-keypair.pem 4096
+openssl req -new -x509 \
+  -key sealed-secrets-keypair.pem \
+  -out sealed-secrets-keypair-public.pem \
+  -days 3650
+
+# Build the JSON secret (the newlines must be preserved — use printf, not echo)
+CRT=$(cat sealed-secrets-keypair-public.pem)
+KEY=$(cat sealed-secrets-keypair.pem)
+cat <<EoF > secret.json
+{
+  "crt": "$CRT",
+  "key": "$KEY"
+}
+EoF
+
+# Store it in AWS Secrets Manager
+aws secretsmanager create-secret \
+  --name sealed-secrets \
+  --secret-string file://secret.json \
+  --region ${AWS_REGION}
+```
+
+> **Keep `sealed-secrets-keypair.pem` safe.** If it is lost, existing SealedSecrets
+> cannot be decrypted and all secrets must be re-sealed with a new keypair.
+
+---
 
 ## Create the management cluster
 
-Create the management cluster using `eksctl`
 ```bash
-cd ~/environment
+cd $GITOPS_HOME
 cp eks-multi-cluster-gitops/initial-setup/config/mgmt-cluster-eksctl.yaml .
-sed -i "s/AWS_REGION/$AWS_REGION/g" mgmt-cluster-eksctl.yaml     
+sed -i${SED_INPLACE} "s/AWS_REGION/$AWS_REGION/g" mgmt-cluster-eksctl.yaml
 eksctl create cluster -f mgmt-cluster-eksctl.yaml
 ```
-This will take some time. You can proceed to the next section in parallel, using a separate terminal window.
+
+> **macOS `sed` note:** macOS requires `sed -i ''` (with an empty string) while Linux uses
+> `sed -i`. To avoid this issue across environments, set a helper variable at the start of
+> your session:
+> ```bash
+> # macOS
+> export SED_INPLACE=" ''"
+> # Linux
+> export SED_INPLACE=""
+> ```
+> Then all `sed -i${SED_INPLACE}` commands in this guide will work on both platforms.
+
+Cluster creation takes 15–20 minutes. You can proceed to **Create the Git repositories**
+in a second terminal while waiting.
+
+---
 
 ## Create the Git repositories
 
@@ -219,235 +256,308 @@ OR
 
 [Using AWS CodeCommit as `GitRepository` backend.](doc/repos/AWSCodeCommit.md#create-and-prepare-the-git-repositories)
 
+After completing either guide, you will have:
+- A `gitops-system` repo (cloned locally)
+- A `gitops-workloads` repo (cloned locally)
+- A `REPO_PREFIX` environment variable set to the URL prefix for your repos
 
-## Setup IAM for Crossplane
-
-The following steps will refer to configuration values from the EKS cluster. Please ensure that the cluster status is
-active before you continue with the following steps.
-
+Verify before continuing:
 ```bash
-# Wait for the cluster status to change to 'Active'
-aws eks wait cluster-active --name mgmt
+echo "REPO_PREFIX: $REPO_PREFIX"
+ls $GITOPS_HOME/gitops-system $GITOPS_HOME/gitops-workloads
 ```
 
-### Export environment variables
+---
+
+## Wait for the management cluster to be active
 
 ```bash
-export MGMT_CLUSTER_INFO=$(aws eks describe-cluster --name mgmt) 
+aws eks wait cluster-active --name mgmt
+echo "Cluster is active"
+```
+
+---
+
+## Set up IAM for Crossplane
+
+### Export cluster environment variables
+
+```bash
+export MGMT_CLUSTER_INFO=$(aws eks describe-cluster --name mgmt)
 export CLUSTER_ARN=$(echo $MGMT_CLUSTER_INFO | yq '.cluster.arn')
 export OIDC_PROVIDER_URL=$(echo $MGMT_CLUSTER_INFO | yq '.cluster.identity.oidc.issuer')
 export OIDC_PROVIDER=${OIDC_PROVIDER_URL#'https://'}
 export CLUSTER_NAME=mgmt
 export CLUSTER_NAME_PSUEDO=mgmt
+
+echo "OIDC provider: $OIDC_PROVIDER"
 ```
 
-### Create an IAM role for Crossplane
+### Create the Crossplane IAM role
 
-1. Create IAM trust policy document
-   ```bash
-   cd ~/environment
-   envsubst \
-     < eks-multi-cluster-gitops/initial-setup/config/crossplane-role-trust-policy-template.json \
-     > crossplane-role-trust-policy.json
-   ```
+```bash
+cd $GITOPS_HOME
 
-2. Create the IAM role that will be used by Crossplane for provisioning AWS resources (DynamoDB table, SQS queue, etc.)
-   ```bash
-   CROSSPLANE_IAM_ROLE_ARN=$(aws iam create-role \
-     --role-name crossplane-role \
-     --assume-role-policy-document file://crossplane-role-trust-policy.json \
-     --output text \
-     --query "Role.Arn")
-   ```
+# Render the trust policy with your account/region values
+envsubst \
+  < eks-multi-cluster-gitops/initial-setup/config/crossplane-role-trust-policy-template.json \
+  > crossplane-role-trust-policy.json
 
-3. Create the IAM policy that grants Crossplane the required permissions to provision the workload clusters, and attach it to the role created in the previous step.
-   ```bash
-   cd ~/environment
-   envsubst \
-   < eks-multi-cluster-gitops/initial-setup/config/crossplane-role-permission-policy-template.json \
-   > crossplane-role-permission-policy.json
+# Create the role
+CROSSPLANE_IAM_ROLE_ARN=$(aws iam create-role \
+  --role-name crossplane-role \
+  --assume-role-policy-document file://crossplane-role-trust-policy.json \
+  --output text \
+  --query "Role.Arn")
 
-   CROSSPLANE_IAM_POLICY_ARN=$(aws iam create-policy \
-      --policy-name crossplane-policy \
-      --policy-document file://crossplane-role-permission-policy.json \
-      --output text \
-      --query "Policy.Arn")
+echo "Crossplane role ARN: $CROSSPLANE_IAM_ROLE_ARN"
 
-   aws iam attach-role-policy --role-name crossplane-role --policy-arn ${CROSSPLANE_IAM_POLICY_ARN}
-   ```
+# Render and attach the permission policy
+envsubst \
+  < eks-multi-cluster-gitops/initial-setup/config/crossplane-role-permission-policy-template.json \
+  > crossplane-role-permission-policy.json
 
-4. Create a `ConfigMap` named `cluster-info` with the cluster details
-   ```bash
-   kubectl create ns flux-system
-   kubectl create configmap cluster-info -n flux-system \
-     --from-literal=AWS_REGION=${AWS_REGION} \
-     --from-literal=ACCOUNT_ID=${ACCOUNT_ID} \
-     --from-literal=CLUSTER_ARN=${CLUSTER_ARN} \
-     --from-literal=OIDC_PROVIDER=${OIDC_PROVIDER} \
-     --from-literal=CLUSTER_NAME=${CLUSTER_NAME} \
-     --from-literal=CLUSTER_NAME_PSUEDO=${CLUSTER_NAME} 
-   ```
+CROSSPLANE_IAM_POLICY_ARN=$(aws iam create-policy \
+  --policy-name crossplane-policy \
+  --policy-document file://crossplane-role-permission-policy.json \
+  --output text \
+  --query "Policy.Arn")
 
-## Allow Karpenter IAM role to access the management cluster
-1. Add a mapping for the IAM entity in `aws-auth` `ConfigMap` using `eksctl`.
+aws iam attach-role-policy \
+  --role-name crossplane-role \
+  --policy-arn ${CROSSPLANE_IAM_POLICY_ARN}
+```
 
-   ```bash
-   eksctl create iamidentitymapping \
-      --cluster mgmt \
-      --region=${AWS_REGION} \
-      --arn arn:aws:iam::${ACCOUNT_ID}:role/karpenter-node-role \
-      --username system:node:{{EC2PrivateDNSName}} \
-      --group system:bootstrappers,system:nodes \
-      --no-duplicate-arns
-   ```
-Please note that Karpenter IAM role itself is yet to be created via GitOps.
+### Create the `cluster-info` ConfigMap
+
+Flux uses this ConfigMap to substitute `${ACCOUNT_ID}`, `${AWS_REGION}`, etc. in manifests
+at reconciliation time.
+
+```bash
+kubectl create ns flux-system
+
+kubectl create configmap cluster-info -n flux-system \
+  --from-literal=AWS_REGION=${AWS_REGION} \
+  --from-literal=ACCOUNT_ID=${ACCOUNT_ID} \
+  --from-literal=CLUSTER_ARN=${CLUSTER_ARN} \
+  --from-literal=OIDC_PROVIDER=${OIDC_PROVIDER} \
+  --from-literal=CLUSTER_NAME=${CLUSTER_NAME} \
+  --from-literal=CLUSTER_NAME_PSUEDO=${CLUSTER_NAME}
+```
+
+---
+
+## Allow Karpenter node role to access the management cluster
+
+> **Note:** The Karpenter IAM role itself is created later via GitOps (Crossplane).
+> This step pre-registers the node role in `aws-auth` so that Karpenter-provisioned
+> nodes can join the cluster once the role exists.
+
+```bash
+eksctl create iamidentitymapping \
+  --cluster mgmt \
+  --region=${AWS_REGION} \
+  --arn arn:aws:iam::${ACCOUNT_ID}:role/karpenter-node-role \
+  --username system:node:{{EC2PrivateDNSName}} \
+  --group system:bootstrappers,system:nodes \
+  --no-duplicate-arns
+```
+
+---
 
 ## Allow access to the management cluster from the EKS console
 
-1. Create the RBAC authorization resources needed for granting an IAM entity access to the cluster through the EKS console.
-   ```bash
-   cd ~/environment
-   kubectl apply -f gitops-system/tools-config/eks-console/role.yaml
-   kubectl apply -f gitops-system/tools-config/eks-console/role-binding.yaml
-   ```
+```bash
+cd $GITOPS_HOME
 
-2. Add a mapping for the IAM entity in `aws-auth` `ConfigMap` using `eksctl`.
+# Apply RBAC resources for EKS console access
+kubectl apply -f gitops-system/tools-config/eks-console/role.yaml
+kubectl apply -f gitops-system/tools-config/eks-console/role-binding.yaml
 
-   ```bash
-   eksctl create iamidentitymapping \
-      --cluster mgmt \
-      --region=${AWS_REGION} \
-      --arn ${EKS_CONSOLE_IAM_ENTITY_ARN} \
-      --username ${EKS_CONSOLE_IAM_ENTITY_ARN} \
-      --no-duplicate-arns
-   ```
+# Register your IAM entity in aws-auth
+eksctl create iamidentitymapping \
+  --cluster mgmt \
+  --region=${AWS_REGION} \
+  --arn ${EKS_CONSOLE_IAM_ENTITY_ARN} \
+  --username ${EKS_CONSOLE_IAM_ENTITY_ARN} \
+  --no-duplicate-arns
+```
+
+> **Verify `EKS_CONSOLE_IAM_ENTITY_ARN` is set:** `echo $EKS_CONSOLE_IAM_ENTITY_ARN`
+> If empty, set it to the ARN of the IAM user or role you use to log in to the AWS console.
+
+---
 
 ## Populate and update the repositories
-   
-To populate the repos you created, copy the content of the
-`multi-cluster-gitops/repos` directories to the corresponding repos you
-created in the previous step:
-```
-cp -r eks-multi-cluster-gitops/repos/gitops-system/* gitops-system/
-cp -r eks-multi-cluster-gitops/repos/gitops-workloads/* gitops-workloads/
-```
-Some of the files in these repos contain placholder references for `AWS_REGION`, `REPO_PREFIX`, and `EKS_CONSOLE_IAM_ENTITY_ARN` which need to be updated to reflect your working region, the location of your repos, and the ARN of the IAM entity that is used for accessing the EKS console.
 
-### Update references to AWS region
+Copy this repo's content into your locally cloned `gitops-system` and `gitops-workloads` repos:
 
-Run the `sed` comand below to update various manifests to point to the correct AWS region:
-```
-sed -i "s/AWS_REGION/$AWS_REGION/g" \
-   gitops-system/clusters-config/template/def/eks-cluster.yaml \
-   gitops-system/tools-config/external-secrets/sealed-secrets-key.yaml
-```
-
-### Update references to GitRepository URLs
-
-1. Verify that REPO_PREFIX is set correctly (for either GitHib or CodeCommit)
-   ```
-   echo $REPO_PREFIX
-   ```
-
-2. Update the `git-repo.yaml` files in the `workloads` folder of the `gitops-system` repo,
-   updating the `url` for the `GitRepository` resource to point at 
-   the `gitpops-workloads` repo created in your account:
-   ```
-   sed -i "s~REPO_PREFIX~$REPO_PREFIX~g" \
-     gitops-system/workloads/template/git-repo.yaml
-   ```
-3. Update the `gotk-sync.yaml` files in the `clusters` folder of the `gitops-system` repo,
-   updating the `url` for the `GitRepository` resource to point at the `gitpops-system` repo created in your account:
-   ```
-   sed -i "s~REPO_PREFIX~$REPO_PREFIX~g" \
-     gitops-system/clusters/mgmt/flux-system/gotk-sync.yaml \
-     gitops-system/clusters/template/flux-system/gotk-sync.yaml
-   ```
-
-4. Update the `git-repo.yaml` files in the `gitops-workloads` repo,
-   updating the `url` for the `GitRepository` resource to point at the `payment-app-manifests` repo created in your account:
-   ```
-   sed -i "s~REPO_PREFIX~$REPO_PREFIX~g" \
-     gitops-workloads/template/app-template/git-repo.yaml
-   ```
-
-### Update references to the IAM entity that is used to access the EKS console
-1. Verify that EKS_CONSOLE_IAM_ENTITY_ARN is set correctly.
-   ```
-   echo $EKS_CONSOLE_IAM_ENTITY_ARN
-   ```
-
-2. Update the various manifest files in `gitops-system` repo, replacing the placeholder for the ARN of the IAM entity that is used to access the EKS console, with the value set in an environment variable.
-   ```
-   sed -i "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
-     gitops-system/tools-config/aws-auth/aws-auth-cm.yaml
-   sed -i "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
-     gitops-system/tools-config/aws-auth/role-binding.yaml
-   sed -i "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
-     gitops-system/clusters/template/aws-auth.yaml
-   ```
-
-## Create sealed secrets for access to Git repos
-
-Flux needs Git credentials in order to access the Git repos, both for management and workloads. In this section, you use the `Secret` manifest you created in the file `git-creds-system.yaml` to create `SealedSecret` manifests, and then copy these into the correct locations in the repos.
-
-The same Git credentials are used for all Git repos. However, the `metadata.name` in the `Secret` needs to be adjusted for each repo before creating the `SealedSecret`.
-
-The `SealedSecret` manifests are then copied into the correct locations for each of the repos as follows:
-
-|Repo|metadata.name|Locations|
-|----|-------------|---------|
-|gitops-system | flux-system | gitops-system/clusters-config/template/secrets/git-secret.yaml |
-|gitops-workloads|gitops-workloads|gitops-system/workloads/template/git-secret.yaml|
-
-Use the following script to generate the `SealedSecret` manifests and copy them to the correct locations:
 ```bash
-kubeseal --cert sealed-secrets-keypair-public.pem --format yaml <git-creds-system.yaml >git-creds-sealed-system.yaml
+cp -r $GITOPS_HOME/eks-multi-cluster-gitops/repos/gitops-system/* $GITOPS_HOME/gitops-system/
+cp -r $GITOPS_HOME/eks-multi-cluster-gitops/repos/gitops-workloads/* $GITOPS_HOME/gitops-workloads/
+```
+
+### Update AWS region placeholders
+
+```bash
+# Linux
+sed -i "s/AWS_REGION/$AWS_REGION/g" \
+  $GITOPS_HOME/gitops-system/clusters-config/template/def/eks-cluster.yaml \
+  $GITOPS_HOME/gitops-system/tools-config/external-secrets/sealed-secrets-key.yaml
+
+# macOS
+sed -i '' "s/AWS_REGION/$AWS_REGION/g" \
+  $GITOPS_HOME/gitops-system/clusters-config/template/def/eks-cluster.yaml \
+  $GITOPS_HOME/gitops-system/tools-config/external-secrets/sealed-secrets-key.yaml
+```
+
+### Update Git repository URLs
+
+Verify `REPO_PREFIX` is set (should have been set during the Git repositories step):
+```bash
+echo "REPO_PREFIX: $REPO_PREFIX"
+```
+
+```bash
+# Linux
+sed -i "s~REPO_PREFIX~$REPO_PREFIX~g" \
+  $GITOPS_HOME/gitops-system/workloads/template/git-repo.yaml \
+  $GITOPS_HOME/gitops-system/clusters/mgmt/flux-system/gotk-sync.yaml \
+  $GITOPS_HOME/gitops-system/clusters/template/flux-system/gotk-sync.yaml \
+  $GITOPS_HOME/gitops-workloads/template/app-template/git-repo.yaml
+
+# macOS
+sed -i '' "s~REPO_PREFIX~$REPO_PREFIX~g" \
+  $GITOPS_HOME/gitops-system/workloads/template/git-repo.yaml \
+  $GITOPS_HOME/gitops-system/clusters/mgmt/flux-system/gotk-sync.yaml \
+  $GITOPS_HOME/gitops-system/clusters/template/flux-system/gotk-sync.yaml \
+  $GITOPS_HOME/gitops-workloads/template/app-template/git-repo.yaml
+```
+
+### Update EKS console IAM entity ARN
+
+```bash
+# Linux
+sed -i "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
+  $GITOPS_HOME/gitops-system/tools-config/aws-auth/aws-auth-cm.yaml \
+  $GITOPS_HOME/gitops-system/tools-config/aws-auth/role-binding.yaml \
+  $GITOPS_HOME/gitops-system/clusters/template/aws-auth.yaml
+
+# macOS
+sed -i '' "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
+  $GITOPS_HOME/gitops-system/tools-config/aws-auth/aws-auth-cm.yaml \
+  $GITOPS_HOME/gitops-system/tools-config/aws-auth/role-binding.yaml \
+  $GITOPS_HOME/gitops-system/clusters/template/aws-auth.yaml
+```
+
+---
+
+## Create Sealed Secrets for Git repo access
+
+Flux needs credentials to pull from your Git repos. You will create a `Secret` manifest
+containing your Git credentials, seal it with `kubeseal`, and commit the `SealedSecret`
+to the repo.
+
+### Create the Git credentials Secret manifest
+
+Create a file `$GITOPS_HOME/git-creds-system.yaml` with your Git credentials.
+For GitHub using a Personal Access Token:
+
+```bash
+cat <<EoF > $GITOPS_HOME/git-creds-system.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flux-system
+  namespace: flux-system
+type: Opaque
+stringData:
+  username: <your-github-username>
+  password: <your-github-personal-access-token>
+EoF
+```
+
+> For SSH-based credentials or CodeCommit, refer to the
+> [Flux documentation on Git authentication](https://fluxcd.io/flux/components/source/gitrepositories/#secret-reference).
+
+### Seal and place the credentials
+
+```bash
+cd $GITOPS_HOME
+
+# Seal for gitops-system repo
+kubeseal --cert sealed-secrets-keypair-public.pem --format yaml \
+  < git-creds-system.yaml \
+  > git-creds-sealed-system.yaml
 cp git-creds-sealed-system.yaml gitops-system/clusters-config/template/secrets/git-secret.yaml
+
+# Seal for gitops-workloads repo (same creds, different Secret name)
 cp git-creds-system.yaml git-creds-workloads.yaml
 yq e '.metadata.name="gitops-workloads"' -i git-creds-workloads.yaml
-kubeseal --cert sealed-secrets-keypair-public.pem --format yaml <git-creds-workloads.yaml >git-creds-sealed-workloads.yaml
+kubeseal --cert sealed-secrets-keypair-public.pem --format yaml \
+  < git-creds-workloads.yaml \
+  > git-creds-sealed-workloads.yaml
 cp git-creds-sealed-workloads.yaml gitops-system/workloads/template/git-secret.yaml
 ```
 
+> **Never commit the plaintext `git-creds-system.yaml` or `git-creds-workloads.yaml` files.**
+> Only the `SealedSecret` (`git-creds-sealed-*.yaml`) outputs are safe to commit.
+
+---
+
 ## Commit and push the repos
 
-With the local repos now populated and updated, you can now push them to their respective remote upstream repos.
+```bash
+# gitops-system
+cd $GITOPS_HOME/gitops-system
+git add .
+git commit -m "initial commit"
+git branch -M main
+git push --set-upstream origin main
 
-1. Commit and push `gitops-system` repo changes 
-   ```bash
-   cd ~/environment/gitops-system
-   git add .
-   git commit -m "initial commit"
-   git branch -M main
-   git push --set-upstream origin main
-   ```
+# gitops-workloads
+cd $GITOPS_HOME/gitops-workloads
+git add .
+git commit -m "initial commit"
+git branch -M main
+git push --set-upstream origin main
+```
 
-2. Commit and push `gitops-workloads` repo changes 
-   ```bash
-   cd ~/environment/gitops-workloads
-   git add .
-   git commit -m "initial commit"
-   git branch -M main
-   git push --set-upstream origin main
-   ```
+---
 
 ## Bootstrap the management cluster
 
-Make sure that `eksctl` has finished creating the management cluster. Then proceed with one of the following, depending on your choice of `GitRepository` backend. If you chose to automatically perform the initial setup using CloudFormation, AWS CodeCommit repositories have been created for you.
+Make sure `eksctl` has finished creating the management cluster before running the bootstrap:
+
+```bash
+aws eks wait cluster-active --name mgmt && echo "Ready to bootstrap"
+```
+
+Then follow the bootstrap guide for your Git backend:
 
 - [Using GitHub as `GitRepository` backend.](doc/repos/GitHub-Bootstrap.md)
 - [Using AWS CodeCommit as `GitRepository` backend.](doc/repos/AWSCodeCommit-Bootstrap.md)
 
-## Monitoring Flux Kustomizations
+---
 
-* To monitor the bootstrapping of the management cluster, list the `Kustomization`
-  resources in the management cluster using the following command:
+## Monitor Flux reconciliation
+
+After bootstrap, watch Flux reconcile all the Kustomizations:
 
 ```bash
-kubectl get kustomization -n flux-system
+kubectl get kustomization -n flux-system --watch
 ```
 
-NOTE: We will soon add a section about Flux notification controller, and how you
-can use that to know the status of the reconciliation activities without having
-to connect to the clusters.
+All Kustomizations should reach `Ready=True`. A common failure on first run is the
+`external-secrets` Kustomization waiting for the Sealed Secrets controller to come up —
+this resolves automatically once all chart deployments complete (typically 5–10 minutes).
+
+Check individual Kustomization errors with:
+```bash
+kubectl describe kustomization <name> -n flux-system
+```
+
+Check HelmRelease status:
+```bash
+kubectl get helmrelease -A
+```
