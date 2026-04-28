@@ -37,6 +37,8 @@ metadata:
   name: default
 spec:
   amiFamily: AL2023
+  amiSelectorTerms:
+    - alias: al2023@latest
   role: karpenter-node-role
   subnetSelectorTerms:
     - tags:
