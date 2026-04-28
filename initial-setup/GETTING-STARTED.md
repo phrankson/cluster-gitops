@@ -532,9 +532,26 @@ sed -i '' "s~EKS_CONSOLE_IAM_ENTITY_ARN~$EKS_CONSOLE_IAM_ENTITY_ARN~g" \
 4. The Sealed Secrets controller in the cluster holds the private key (fetched from Secrets Manager by ESO) and decrypts the `SealedSecret` back into a real `Secret` at runtime.
 5. Flux reads that `Secret` and uses it to authenticate to Git.
 
-### Step 1: Create the plaintext credential file
+### Step 1: Create a GitHub Personal Access Token (PAT)
 
-For GitHub using a Personal Access Token:
+**Is this the same as the SSH key from earlier?** No. That SSH key was for *you* (your local machine and the GitHub CLI). This PAT is for *Flux* — it runs inside the cluster and needs its own credential to pull from your private repos.
+
+**Do I already have one?** Check at [https://github.com/settings/tokens](https://github.com/settings/tokens). If you see a token scoped to `repo`, you can reuse it. If not, create a new one now.
+
+**How to create a PAT:**
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)**
+2. Click **Generate new token (classic)**
+3. Set an expiration (90 days is a reasonable default)
+4. Under scopes, tick **`repo`** (full control of private repositories) — this is the only scope Flux needs
+5. Click **Generate token** and copy it immediately — GitHub only shows it once
+
+**Store it as an environment variable** so you don't have to paste it into the file manually:
+```bash
+export GITHUB_TOKEN=<paste-your-token-here>
+export GITHUB_ACCOUNT=<your-github-username>
+```
+
+### Step 1b: Create the plaintext credential file
 
 ```bash
 cat <<EoF > $GITOPS_HOME/git-creds-system.yaml
@@ -545,12 +562,12 @@ metadata:
   namespace: flux-system
 type: Opaque
 stringData:
-  username: <your-github-username>
-  password: <your-github-personal-access-token>
+  username: $GITHUB_ACCOUNT
+  password: $GITHUB_TOKEN
 EoF
 ```
 
-> For SSH keys or CodeCommit, see the [Flux authentication docs](https://fluxcd.io/flux/components/source/gitrepositories/#secret-reference).
+This file is **plaintext** — do not commit it. The next step encrypts it.
 
 ### Step 2: Seal and place the secrets
 
