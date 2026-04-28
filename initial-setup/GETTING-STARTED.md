@@ -88,7 +88,7 @@ export EKS_CONSOLE_IAM_ENTITY_ARN=$(aws sts get-caller-identity --query Arn --ou
 
 # A local directory for generated files (keypairs, rendered policy docs, etc.)
 # that should NOT be committed to Git
-export GITOPS_HOME=~/gitops
+export GITOPS_HOME=$(pwd)
 mkdir -p $GITOPS_HOME
 
 echo "Account : $ACCOUNT_ID"
