@@ -1,17 +1,19 @@
 ---
-apiVersion: pkg.crossplane.io/v1alpha1
-kind: ControllerConfig
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
 metadata:
   name: aws-config
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/crossplane-role
 spec:
-  podSecurityContext:
-    fsGroup: 2000
-  args:
-  - '--debug'
-  securityContext:
-    runAsUser: 0
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        metadata:
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/crossplane-role
+        spec:
+          securityContext:
+            fsGroup: 2000
 ---
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
@@ -19,5 +21,5 @@ metadata:
   name: provider-aws
 spec:
   package: "xpkg.upbound.io/crossplane-contrib/provider-aws:v0.47.1"
-  controllerConfigRef:
+  runtimeConfigRef:
     name: aws-config

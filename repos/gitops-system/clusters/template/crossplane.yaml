@@ -24,12 +24,12 @@ spec:
           value:
             - target:
                 group: pkg.crossplane.io
-                kind: ControllerConfig
-                version: v1alpha1
+                kind: DeploymentRuntimeConfig
+                version: v1beta1
                 name: aws-config
               patch: |-
                 - op: replace
-                  path: /metadata/annotations
+                  path: /spec/deploymentTemplate/spec/template/metadata/annotations
                   value:
                     eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/crossplane-role-cluster-name
         - op: add

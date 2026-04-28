@@ -1,19 +1,22 @@
 ---
-apiVersion: pkg.crossplane.io/v1alpha1
-kind: ControllerConfig
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
 metadata:
   name: k8s-config
 spec:
-  podSecurityContext:
-    fsGroup: 2000
-  args:
-  - '--debug'
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          securityContext:
+            fsGroup: 2000
 ---
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.13.0"
-  controllerConfigRef:
+  package: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.16.0"
+  runtimeConfigRef:
     name: k8s-config
