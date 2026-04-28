@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: aws-ebs-csi-driver
-      version: '2.30.0'
+      version: '2.38.1'
       sourceRef:
         kind: HelmRepository
         name: aws-ebs-csi-repository
