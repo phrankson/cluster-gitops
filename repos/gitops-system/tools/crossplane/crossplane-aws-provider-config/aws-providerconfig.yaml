@@ -6,4 +6,3 @@ metadata:
 spec:
   credentials:
     source: InjectedIdentity
-  region: ${AWS_REGION}
