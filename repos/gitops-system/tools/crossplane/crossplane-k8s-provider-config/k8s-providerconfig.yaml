@@ -29,7 +29,7 @@ spec:
       serviceAccountName: k8s-provider-config-job-sa
       containers:
       - name: kubectl
-        image: bitnami/kubectl:1.31
+        image: registry.k8s.io/kubectl:v1.31.0
         command:
         - "/bin/bash"
         - "-c"
@@ -72,7 +72,7 @@ spec:
           serviceAccountName: k8s-provider-config-job-sa
           containers:
           - name: kubectl
-            image: bitnami/kubectl:1.31
+            image: registry.k8s.io/kubectl:v1.31.0
             command:
             - "/bin/bash"
             - "-c"
