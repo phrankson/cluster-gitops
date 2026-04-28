@@ -12,6 +12,7 @@ spec:
           annotations:
             eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/crossplane-role
         spec:
+          containers: []
           securityContext:
             fsGroup: 2000
 ---

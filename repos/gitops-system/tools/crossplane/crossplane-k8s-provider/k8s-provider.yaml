@@ -9,6 +9,7 @@ spec:
       selector: {}
       template:
         spec:
+          containers: []
           securityContext:
             fsGroup: 2000
 ---
