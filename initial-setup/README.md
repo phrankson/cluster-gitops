@@ -261,6 +261,14 @@ After completing either guide, you will have:
 - A `gitops-workloads` repo (cloned locally)
 - A `REPO_PREFIX` environment variable set to the URL prefix for your repos
 
+**Important**: `REPO_PREFIX` must match the credential type sealed in `git-secret.yaml`:
+- If using **username/PAT** (recommended): `REPO_PREFIX=https://github.com/<user>`
+- If using **SSH deploy keys**: `REPO_PREFIX=ssh://git@github.com/<user>`
+
+The sealed git credentials for workload clusters contain `username` and `password` fields,
+which only work with HTTPS URLs. Do not use `ssh://` URLs unless you re-seal with SSH keys
+(`identity`, `identity.pub`, `known_hosts`).
+
 Verify before continuing:
 ```bash
 echo "REPO_PREFIX: $REPO_PREFIX"

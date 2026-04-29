@@ -492,6 +492,8 @@ spec:
                 matchControllerRef: true
                 matchLabels:
                   type: subnet
+            accessConfig:
+              authenticationMode: API_AND_CONFIG_MAP
           writeConnectionSecretToRef:
             namespace: crossplane-system
       patches:
@@ -573,8 +575,8 @@ spec:
           transforms:
             - type: map
               map:
-                gpu: AL2_x86_64_GPU
-                non-gpu: AL2_x86_64
+                gpu: AL2023_x86_64_NVIDIA
+                non-gpu: AL2023_x86_64_STANDARD
 
     - name: cluster-oidc-idp
       base:

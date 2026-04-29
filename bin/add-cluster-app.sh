@@ -34,10 +34,10 @@ then
     cp $gitops_workloads/template/kustomization.yaml $gitops_workloads/$cluster_name
 fi
 cp -R $gitops_workloads/template/app-template/* $gitops_workloads/$cluster_name/$app_name
-grep -RiIl 'cluster-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i "s/cluster-name/$cluster_name/g"
-grep -RiIl 'overlay-dir-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i "s/overlay-dir-name/$overlay_dir_name/g"
-grep -RiIl 'app-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i "s/app-name/$app_name/g"
-grep -RiIl 'branch-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i "s/branch-name/$branch_name/g"
+grep -RiIl 'cluster-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i '' "s/cluster-name/$cluster_name/g"
+grep -RiIl 'overlay-dir-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i '' "s/overlay-dir-name/$overlay_dir_name/g"
+grep -RiIl 'app-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i '' "s/app-name/$app_name/g"
+grep -RiIl 'branch-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -i '' "s/branch-name/$branch_name/g"
 
 
 # Prep the sealed secret
@@ -45,9 +45,9 @@ grep -RiIl 'branch-name' $gitops_workloads/$cluster_name/$app_name | xargs sed -
 tmp_git_creds=$(mktemp /tmp/git-creds.yaml.XXXXXXXXX)
 cp $git_creds_file $tmp_git_creds
 APP_NAME=$app_name yq e '.metadata.name=strenv(APP_NAME)' -i $tmp_git_creds
-KEY=$(cat $private_key_file | base64 -w 0) yq -i '.data.identity = strenv(KEY)' $tmp_git_creds
-CERT=$(cat $public_key_file | base64 -w 0) yq -i '.data."identity.pub" = strenv(CERT)' $tmp_git_creds
-HOSTS=$(echo $known_hosts | base64 -w 0) yq -i '.data.known_hosts = strenv(HOSTS)' $tmp_git_creds
+KEY=$(cat $private_key_file | base64) yq -i '.data.identity = strenv(KEY)' $tmp_git_creds
+CERT=$(cat $public_key_file | base64) yq -i '.data."identity.pub" = strenv(CERT)' $tmp_git_creds
+HOSTS=$(echo $known_hosts | base64) yq -i '.data.known_hosts = strenv(HOSTS)' $tmp_git_creds
 kubeseal --cert $pem_file --format yaml <$tmp_git_creds >$gitops_workloads/$cluster_name/$app_name/git-secret.yaml
 rm $tmp_git_creds
 

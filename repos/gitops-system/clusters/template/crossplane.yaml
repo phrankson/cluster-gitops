@@ -29,7 +29,7 @@ spec:
                 name: aws-config
               patch: |-
                 - op: replace
-                  path: /spec/deploymentTemplate/spec/template/metadata/annotations
+                  path: /spec/serviceAccountTemplate/metadata/annotations
                   value:
                     eks.amazonaws.com/role-arn: arn:aws:iam::${ACCOUNT_ID}:role/crossplane-role-cluster-name
         - op: add

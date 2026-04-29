@@ -36,7 +36,7 @@ metadata:
 spec:
   forProvider:
     policyArnRef:
-      name: crossplane-iam-policy
+      name: crossplane-policy
     roleNameRef:
       name: crossplane-role
   providerConfigRef:

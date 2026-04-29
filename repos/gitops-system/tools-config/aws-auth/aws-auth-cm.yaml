@@ -10,7 +10,5 @@ data:
       - system:nodes
       rolearn: arn:aws:iam::${ACCOUNT_ID}:role/eks-nodegroup-role
       username: system:node:{{EC2PrivateDNSName}}
-    - rolearn: EKS_CONSOLE_IAM_ENTITY_ARN
-      username: EKS_CONSOLE_IAM_ENTITY_ARN
   mapUsers: |
     []

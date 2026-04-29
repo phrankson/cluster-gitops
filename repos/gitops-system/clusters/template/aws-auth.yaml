@@ -33,11 +33,14 @@ spec:
             - system:nodes
             rolearn: arn:aws:iam::${ACCOUNT_ID}:role/eks-nodegroup-role
             username: system:node:{{EC2PrivateDNSName}}
-          - rolearn: EKS_CONSOLE_IAM_ENTITY_ARN
-            username: EKS_CONSOLE_IAM_ENTITY_ARN
           - groups:
             - system:bootstrappers
             - system:nodes
             rolearn: arn:aws:iam::${ACCOUNT_ID}:role/karpenter-node-role-cluster-name
             username: system:node:{{EC2PrivateDNSName}}
+        mapUsers: |
+          - userarn: arn:aws:iam::${ACCOUNT_ID}:user/iamadmin
+            username: arn:aws:iam::${ACCOUNT_ID}:user/iamadmin
+            groups:
+              - system:masters
 ---
